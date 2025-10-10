@@ -3,16 +3,28 @@ const mongoose = require("mongoose");
 // Review schema
 const reviewSchema = new mongoose.Schema(
   {
-    user: {
+    userId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User", // Ensure your User model name matches
-      required: [true, "Review must have a user"],
+      ref: "User",
+    },
+    user: {
+      fullName: {
+        type: String,
+        trim: true,
+      },
+      email: {
+        type: String,
+        trim: true,
+      },
+      phone: {
+        type: String,
+        trim: true,
+      },
     },
     rating: {
       type: Number,
       min: [1, "Rating must be at least 1"],
       max: [5, "Rating cannot exceed 5"],
-      required: [true, "Rating is required"],
     },
     comment: {
       type: String,
@@ -51,13 +63,21 @@ const productSchema = new mongoose.Schema(
         default: "BDT",
       },
     },
-    images: [
-      {
-        url: { type: String, required: true },
-        thumbnail: { type: String, default: "" },
-        id: { type: String, default: "" },
+    images: {
+      type: [
+        {
+          url: { type: String, required: true },
+          thumbnail: { type: String, default: "" },
+          id: { type: String, default: "" },
+        },
+      ],
+      validate: {
+        validator: function (val) {
+          return val.length <= 5; // Maximum 5 images
+        },
+        message: "Cannot have more than 5 images",
       },
-    ],
+    },
     category: {
       type: String,
       trim: true,
@@ -68,7 +88,16 @@ const productSchema = new mongoose.Schema(
       min: [0, "Stock cannot be negative"],
       default: 0,
     },
-    reviews: [reviewSchema],
+    sold: {
+      type: Number,
+      min: [0, "Sold quantity cannot be negative"],
+      default: 0,
+    },
+    reviews: {
+      type: [reviewSchema],
+      required: false,
+      default: [],
+    },
     averageRating: {
       type: Number,
       default: 0,

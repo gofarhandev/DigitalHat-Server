@@ -14,7 +14,7 @@ router.post(
   "/",
   verifyToken,
   isAdmin,
-  upload.array("images", 5), // up to 5 images under form-field name "images"
+  upload.array("images", 5),
   productCtrl.createProduct
 );
 
@@ -23,15 +23,21 @@ router.put(
   "/:id",
   verifyToken,
   isAdmin,
-  upload.array("images", 5), // include if you want to accept new images on update
+  upload.array("images", 5),
   productCtrl.updateProduct
 );
+
+// Get products by category
+router.get("/category/:categoryName", productCtrl.getProductsByCategory);
 
 router.delete("/:id", verifyToken, isAdmin, productCtrl.deleteProduct);
 
 // ----- Authenticated user routes (reviews) & public product routes -----
-router.post("/:id/reviews", verifyToken, productCtrl.addReview);
 router.get("/", productCtrl.getProducts);
 router.get("/:id", productCtrl.getProductById);
+
+// ✅ Get all reviews for a specific product
+router.get("/:productId/reviews", productCtrl.getReviews);
+router.post("/:id/reviews", verifyToken, productCtrl.addReview);
 
 module.exports = router;

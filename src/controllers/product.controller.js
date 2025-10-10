@@ -1,5 +1,6 @@
 const Product = require("../models/product.model");
 const { uploadImage } = require("../utils/imagekit.service");
+const User = require("../models/user.model");
 
 // Helper to safely parse JSON strings
 const safeParseJSON = (value) => {
@@ -30,14 +31,19 @@ exports.createProduct = async (req, res) => {
     } = req.body;
 
     // Basic validation
-    if (!title) return res.status(400).json({ success: false, message: "Title is required" });
+    if (!title)
+      return res
+        .status(400)
+        .json({ success: false, message: "Title is required" });
 
     // Parse specification (prefer JSON string or object). If invalid JSON => error.
     let parsedSpec = {};
     if (specification) {
       const maybeSpec = safeParseJSON(specification);
       if (maybeSpec === null) {
-        return res.status(400).json({ success: false, message: "Invalid specification JSON" });
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid specification JSON" });
       }
       parsedSpec = maybeSpec;
     }
@@ -47,7 +53,9 @@ exports.createProduct = async (req, res) => {
     if (price) {
       const maybePrice = safeParseJSON(price);
       if (maybePrice === null) {
-        return res.status(400).json({ success: false, message: "Invalid price JSON" });
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid price JSON" });
       }
       parsedPrice = maybePrice;
     } else if (price_amount) {
@@ -57,14 +65,25 @@ exports.createProduct = async (req, res) => {
       };
     }
 
-    if (!parsedPrice || parsedPrice.amount === undefined || parsedPrice.amount === null || Number.isNaN(Number(parsedPrice.amount))) {
-      return res.status(400).json({ success: false, message: "price.amount is required and must be a number" });
+    if (
+      !parsedPrice ||
+      parsedPrice.amount === undefined ||
+      parsedPrice.amount === null ||
+      Number.isNaN(Number(parsedPrice.amount))
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "price.amount is required and must be a number",
+      });
     }
 
     // Parse stock
     const parsedStock = stock !== undefined ? Number(stock) : 0;
     if (Number.isNaN(parsedStock) || parsedStock < 0) {
-      return res.status(400).json({ success: false, message: "stock must be a non-negative number" });
+      return res.status(400).json({
+        success: false,
+        message: "stock must be a non-negative number",
+      });
     }
 
     // Upload images (if any)
@@ -104,10 +123,42 @@ exports.createProduct = async (req, res) => {
   }
 };
 
+exports.getProductsByCategory = async (req, res) => {
+  try {
+    const rawCategory = req.params.categoryName; // e.g. "tws-earbuds"
+
+    // Convert hyphenated lowercase to proper category format
+    const category = rawCategory
+      .split("-")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+
+    // Use MongoDB regex for case-insensitive search in title/description
+    const products = await Product.find({
+      $or: [
+        { category: category }, // exact category match
+        { title: { $regex: category, $options: "i" } }, // title contains keyword
+        { description: { $regex: category, $options: "i" } }, // description contains keyword
+      ],
+    });
+
+    if (!products.length) {
+      return res
+        .status(404)
+        .json({ message: "No products found in this category or keyword" });
+    }
+
+    res.status(200).json({ products });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 // Get all products
 exports.getProducts = async (req, res) => {
   try {
-    const { page = 1, limit = 10, search, category } = req.query;
+    const { page = 1, limit = 20, search, category } = req.query;
     let filter = {};
 
     if (category) filter.category = category;
@@ -129,7 +180,10 @@ exports.getProducts = async (req, res) => {
 exports.getProductById = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
-    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
+    if (!product)
+      return res
+        .status(404)
+        .json({ success: false, message: "Product not found" });
     res.json({ success: true, product });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -140,7 +194,10 @@ exports.getProductById = async (req, res) => {
 exports.updateProduct = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
-    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
+    if (!product)
+      return res
+        .status(404)
+        .json({ success: false, message: "Product not found" });
 
     // Accept same fields as create (form-data)
     const {
@@ -149,6 +206,7 @@ exports.updateProduct = async (req, res) => {
       specification, // may replace the whole specification object
       category,
       stock,
+      sold, // ✅ new field added
       price, // JSON string OR
       price_amount,
       price_currency,
@@ -164,7 +222,9 @@ exports.updateProduct = async (req, res) => {
     if (specification !== undefined) {
       const maybeSpec = safeParseJSON(specification);
       if (maybeSpec === null) {
-        return res.status(400).json({ success: false, message: "Invalid specification JSON" });
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid specification JSON" });
       }
       product.specification = maybeSpec;
     }
@@ -174,7 +234,9 @@ exports.updateProduct = async (req, res) => {
     if (price) {
       const maybePrice = safeParseJSON(price);
       if (maybePrice === null) {
-        return res.status(400).json({ success: false, message: "Invalid price JSON" });
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid price JSON" });
       }
       parsedPrice = maybePrice;
     } else if (price_amount) {
@@ -185,8 +247,14 @@ exports.updateProduct = async (req, res) => {
     }
 
     if (parsedPrice) {
-      if (parsedPrice.amount === undefined || parsedPrice.amount === null || Number.isNaN(Number(parsedPrice.amount))) {
-        return res.status(400).json({ success: false, message: "price.amount must be a number" });
+      if (
+        parsedPrice.amount === undefined ||
+        parsedPrice.amount === null ||
+        Number.isNaN(Number(parsedPrice.amount))
+      ) {
+        return res
+          .status(400)
+          .json({ success: false, message: "price.amount must be a number" });
       }
       product.price = {
         amount: Number(parsedPrice.amount),
@@ -198,17 +266,36 @@ exports.updateProduct = async (req, res) => {
     if (stock !== undefined) {
       const parsedStock = Number(stock);
       if (Number.isNaN(parsedStock) || parsedStock < 0) {
-        return res.status(400).json({ success: false, message: "stock must be a non-negative number" });
+        return res.status(400).json({
+          success: false,
+          message: "stock must be a non-negative number",
+        });
       }
       product.stock = parsedStock;
     }
 
+    // ✅ sold update
+    if (sold !== undefined) {
+      const parsedSold = Number(sold);
+      if (Number.isNaN(parsedSold) || parsedSold < 0) {
+        return res.status(400).json({
+          success: false,
+          message: "sold must be a non-negative number",
+        });
+      }
+      product.sold = parsedSold;
+    }
+
     // remove images if provided (optional)
     if (removeImageIds) {
-      const idsToRemove = String(removeImageIds).split(",").map((s) => s.trim()).filter(Boolean);
+      const idsToRemove = String(removeImageIds)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
       if (idsToRemove.length > 0) {
-        product.images = product.images.filter((img) => !idsToRemove.includes(String(img.id)));
-        // optionally delete from ImageKit here if you implement deleteImage(fileId)
+        product.images = product.images.filter(
+          (img) => !idsToRemove.includes(String(img.id))
+        );
       }
     }
 
@@ -239,7 +326,10 @@ exports.updateProduct = async (req, res) => {
 exports.deleteProduct = async (req, res) => {
   try {
     const product = await Product.findByIdAndDelete(req.params.id);
-    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
+    if (!product)
+      return res
+        .status(404)
+        .json({ success: false, message: "Product not found" });
     // optionally delete product.images from ImageKit here
     res.json({ success: true, message: "Product deleted" });
   } catch (error) {
@@ -253,22 +343,53 @@ exports.deleteProduct = async (req, res) => {
 exports.addReview = async (req, res) => {
   try {
     const { rating, comment } = req.body;
+
     const product = await Product.findById(req.params.id);
-    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
+    if (!product)
+      return res
+        .status(404)
+        .json({ success: false, message: "Product not found" });
+
+    // Ensure reviews array exists
+    product.reviews = product.reviews || [];
 
     // Check if user already reviewed
     const alreadyReviewed = product.reviews.find(
-      (r) => r.user.toString() === req.user._id.toString()
+      (r) => r.userId?.toString() === req.user._id.toString()
     );
-    if (alreadyReviewed) return res.status(400).json({ success: false, message: "Product already reviewed by you" });
+    if (alreadyReviewed)
+      return res
+        .status(400)
+        .json({ success: false, message: "Product already reviewed by you" });
 
-    const review = { user: req.user._id, rating: Number(rating), comment };
+    // Get user info
+    const user = await User.findById(req.user._id).select(
+      "fullName email phone"
+    );
+    if (!user)
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+
+    // Create review
+    const review = {
+      userId: req.user._id,
+      user: {
+        fullName: user.fullName,
+        email: user.email,
+        phone: user.phone,
+      },
+      rating: Number(rating),
+      comment,
+    };
+
     product.reviews.push(review);
 
     // Update stats
     product.reviewCount = product.reviews.length;
     product.averageRating =
-      product.reviews.reduce((acc, r) => acc + r.rating, 0) / product.reviews.length;
+      product.reviews.reduce((acc, r) => acc + r.rating, 0) /
+      product.reviews.length;
 
     await product.save();
     res.status(201).json({ success: true, review });
@@ -280,34 +401,25 @@ exports.addReview = async (req, res) => {
 // Get all reviews
 exports.getReviews = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id).select("reviews");
-    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
-    res.json({ success: true, reviews: product.reviews });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-// Delete review
-exports.deleteReview = async (req, res) => {
-  try {
-    const { id, reviewId } = req.params;
-    const product = await Product.findById(id);
-    if (!product) return res.status(404).json({ success: false, message: "Product not found" });
-
-    product.reviews = product.reviews.filter(
-      (r) => r._id.toString() !== reviewId
+    const product = await Product.findById(req.params.productId).select(
+      "reviews"
     );
+    if (!product)
+      return res
+        .status(404)
+        .json({ success: false, message: "Product not found" });
 
-    // Update stats
-    product.reviewCount = product.reviews.length;
-    product.averageRating =
-      product.reviews.length > 0
-        ? product.reviews.reduce((acc, r) => acc + r.rating, 0) / product.reviews.length
-        : 0;
+    // Only return user info that is already saved in review
+    const reviews = product.reviews.map((r) => ({
+      _id: r._id,
+      rating: r.rating,
+      comment: r.comment,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+      user: r.user, // fullName + email/phone
+    }));
 
-    await product.save();
-    res.json({ success: true, message: "Review deleted" });
+    res.json({ success: true, reviews });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
