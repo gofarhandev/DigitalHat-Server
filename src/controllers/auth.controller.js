@@ -3,46 +3,39 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/user.model");
 const { sendOtp, verifyOtp } = require("../utils/otp.service");
 
-// In-memory store for pending user registrations
-const pendingUsers = new Map(); // identifier -> { fullName, email, phone, password }
+const pendingUsers = new Map();
 
-// Define 30 days in milliseconds for cookie expiration
 const thirtyDaysInMs = 30 * 24 * 60 * 60 * 1000;
-
-// 🔐 Helper function — generate token (Set expiration to '30d')
-const generateToken = (payload, expiresIn = "30d") => {
-  return jwt.sign(payload, process.env.JWT_SECRET_KEY, {
-    expiresIn,
-  });
-};
 
 // 1️⃣ Register (save to pending, send OTP)
 async function register(req, res) {
   try {
-    const { fullName, email, phone, password } = req.body;
-    if (!fullName || !password)
+    // Only email is used for authentication flow now
+    const { fullName, email, password } = req.body;
+
+    if (!fullName || !password || !email)
       return res
         .status(400)
-        .json({ message: "fullName and password required" });
-    if (!email && !phone)
-      return res.status(400).json({ message: "Email or phone required" });
+        .json({ message: "fullName, email, and password are required" });
 
-    // Duplicate check
-    if (email && (await User.findOne({ email })))
+    // Duplicate check (only for email)
+    if (await User.findOne({ email }))
       return res.status(409).json({ message: "Email exists" });
-    if (phone && (await User.findOne({ phone })))
-      return res.status(409).json({ message: "Phone exists" });
 
     // Hash password
     const hashed = await bcrypt.hash(password, 10);
 
-    const identifier = email || phone;
-    pendingUsers.set(identifier, { fullName, email, phone, password: hashed });
+    const identifier = email; // Email is the primary verification identifier
 
-    // Send OTP
+    // Storing data without the top-level phone field
+    pendingUsers.set(identifier, { fullName, email, password: hashed });
+
+    // Send OTP (assumes sendOtp can handle email format)
     sendOtp(identifier, "verify");
 
-    return res.json({ message: "OTP sent, complete verification to register" });
+    return res.json({
+      message: "OTP sent to email, complete verification to register",
+    });
   } catch (err) {
     console.error(err);
     return res
@@ -56,7 +49,9 @@ async function verifyOtpHandler(req, res) {
   try {
     const { identifier, otp } = req.body;
     if (!identifier || !otp)
-      return res.status(400).json({ message: "identifier and otp required" });
+      return res
+        .status(400)
+        .json({ message: "identifier (email) and otp required" });
 
     const result = verifyOtp(identifier, otp);
     if (!result.ok)
@@ -66,37 +61,40 @@ async function verifyOtpHandler(req, res) {
 
     const pending = pendingUsers.get(identifier);
     if (!pending)
-      return res.status(400).json({ message: "No pending registration" });
+      return res
+        .status(400)
+        .json({ message: "No pending registration found for this identifier" });
 
+    // User creation: isEmailVerified is true as verification just completed
     const user = await User.create({
       ...pending,
-      isEmailVerified: !!pending.email,
-      isPhoneVerified: !!pending.phone,
+      isEmailVerified: true,
+      isPhoneVerified: false, // Since top-level phone is gone, this is set to false by default
     });
     pendingUsers.delete(identifier);
 
+    // 🔐 Generate JWT token (30 days)
     const payload = { id: user._id, role: user.role };
-    const token = generateToken(payload);
+    const token = jwt.sign(payload, process.env.JWT_SECRET_KEY, {
+      expiresIn: "30d",
+    });
 
     // Set token in HTTP-only cookie for secure, persistent session (30 days)
     res.cookie("token", token, {
       httpOnly: true,
       maxAge: thirtyDaysInMs,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
     });
 
     return res.json({
       message: "Registration complete",
-      // Token returned in JSON body for client-side storage (e.g., localStorage),
-      // which is needed for Authorization header checks in React.
       token,
       user: {
         id: user._id,
         fullName: user.fullName,
         email: user.email,
-        phone: user.phone,
         role: user.role,
+        shippingAddress: user.shippingAddress,
       },
     });
   } catch (err) {
@@ -110,66 +108,75 @@ async function verifyOtpHandler(req, res) {
 // 3️⃣ Login
 async function login(req, res) {
   try {
-    const { email, phone, password } = req.body;
+    const { email, password } = req.body; // Removed phone from destructuring
 
-    if ((!email && !phone) || !password)
+    // ✅ Validate input: now requires email
+    if (!email || !password) {
       return res
         .status(400)
-        .json({ message: "Email or phone and password are required" });
+        .json({ message: "Email and password are required" });
+    }
 
-    const user = await User.findOne({ $or: [{ email }, { phone }] });
-    if (!user) return res.status(401).json({ message: "Invalid credentials" });
-
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch)
+    // ✅ Find user by email only. Explicitly select the password field.
+    const user = await User.findOne({ email }).select("+password");
+    if (!user) {
       return res.status(401).json({ message: "Invalid credentials" });
+    }
 
-    const payload = { id: user._id, role: user.role };
-    const token = generateToken(payload);
+    // ✅ Compare password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(401).json({ message: "Invalid credentials" });
+    }
 
-    // Set token in HTTP-only cookie for secure, persistent session (30 days)
+    // 🔐 Generate JWT token (30 days)
+    const token = jwt.sign(
+      { id: user._id, email: user.email, role: user.role },
+      process.env.JWT_SECRET_KEY,
+      { expiresIn: "30d" }
+    );
+
+    // ✅ Set token in HTTP-only cookie
     res.cookie("token", token, {
       httpOnly: true,
-      maxAge: thirtyDaysInMs,
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
     });
 
-    return res.json({
-      message: "Login successful",
-      // Token returned in JSON body for client-side storage (e.g., localStorage),
-      // which is needed for Authorization header checks in React.
+    // ✅ Respond with user data
+    res.status(200).json({
+      message: "Logged in successfully",
       token,
       user: {
         id: user._id,
-        fullName: user.fullName,
         email: user.email,
-        phone: user.phone,
+        fullName: user.fullName,
         role: user.role,
+        shippingAddress: user.shippingAddress,
       },
     });
-  } catch (err) {
-    console.error(err);
-    return res
-      .status(500)
-      .json({ message: "Server error", error: err.message });
+  } catch (error) {
+    console.error("Error logging in user:", error);
+    return res.status(500).json({ message: "Internal server error" });
   }
 }
 
 // 4️⃣ Get current logged-in user
 async function getMe(req, res) {
   try {
+    // req.user is populated by a middleware which typically fetches the user from DB
     if (!req.user)
       return res.status(401).json({ message: "Authentication required" });
 
+    // Respond with fields present in the schema
     return res.json({
       success: true,
       user: {
         id: req.user._id,
         fullName: req.user.fullName,
         email: req.user.email,
-        phone: req.user.phone,
         role: req.user.role,
+        shippingAddress: req.user.shippingAddress,
       },
     });
   } catch (err) {
@@ -185,7 +192,6 @@ function logout(req, res) {
   res.clearCookie("token", {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
   });
   return res.json({ message: "Logged out" });
 }

@@ -50,14 +50,7 @@ const userSchema = new mongoose.Schema(
       sparse: true,
       validate: (v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
     },
-    phone: {
-      type: String,
-      trim: true,
-      unique: true,
-      sparse: true,
-      validate: (v) => !v || /^(?:\+88|88)?(01[3-9]\d{8})$/.test(v),
-    },
-    password: { type: String, required: true, minlength: 6 },
+    password: { type: String, required: true, minlength: 6, select: false },
     role: { type: String, enum: ["user", "admin"], default: "user" },
     shippingAddress: { type: addressSchema, default: undefined },
     isEmailVerified: { type: Boolean, default: false },
@@ -67,10 +60,8 @@ const userSchema = new mongoose.Schema(
 );
 
 userSchema.pre("validate", function (next) {
-  if (!this.email && !this.phone)
-    return next(
-      new Error("Either email or Bangladeshi phone number is required")
-    );
+  if (!this.email)
+    return next(new Error("Email is required for user registration."));
   next();
 });
 
