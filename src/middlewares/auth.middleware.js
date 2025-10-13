@@ -48,4 +48,15 @@ const isAdmin = (req, res, next) => {
   next();
 };
 
-module.exports = { verifyToken, isAdmin };
+// ----- 2️⃣ User Check Middleware -----
+const isUser = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ message: "Not authenticated" });
+  }
+  if (req.user.role !== "user") {
+    return res.status(403).json({ message: "User access required" });
+  }
+  next();
+};
+
+module.exports = { verifyToken, isAdmin, isUser };

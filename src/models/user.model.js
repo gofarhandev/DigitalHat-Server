@@ -54,7 +54,6 @@ const userSchema = new mongoose.Schema(
     role: { type: String, enum: ["user", "admin"], default: "user" },
     shippingAddress: { type: addressSchema, default: undefined },
     isEmailVerified: { type: Boolean, default: false },
-    isPhoneVerified: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
