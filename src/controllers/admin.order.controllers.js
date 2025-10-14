@@ -7,7 +7,13 @@ const mongoose = require("mongoose");
 /**
  * Helpers
  */
-const VALID_STATUSES = ["PENDING", "CONFIRMED", "CANCELLED", "SHIPPED", "DELIVERED"];
+const VALID_STATUSES = [
+  "PENDING",
+  "CONFIRMED",
+  "CANCELLED",
+  "SHIPPED",
+  "DELIVERED",
+];
 
 function buildFiltersFromQuery(q = {}) {
   const filters = {};
@@ -39,7 +45,11 @@ async function getAllOrders(req, res) {
     const filters = buildFiltersFromQuery(req.query);
 
     const [orders, totalItems] = await Promise.all([
-      Order.find(filters).sort(sort).skip(skip).limit(limit).populate("user", "fullName email"),
+      Order.find(filters)
+        .sort(sort)
+        .skip(skip)
+        .limit(limit)
+        .populate("user", "fullName email"),
       Order.countDocuments(filters),
     ]);
 
@@ -62,7 +72,9 @@ async function getOrderByIdAdmin(req, res) {
   const { id } = req.params;
 
   try {
-    const order = await Order.findById(id).populate("user", "fullName email").lean();
+    const order = await Order.findById(id)
+      .populate("user", "fullName email")
+      .lean();
     if (!order) return res.status(404).json({ message: "Order not found" });
 
     // Build basic timeline (you can expand with stored events if you have them)
@@ -95,7 +107,11 @@ async function updateOrderStatus(req, res) {
   const { status } = req.body;
 
   if (!status || !VALID_STATUSES.includes(status)) {
-    return res.status(400).json({ message: `Invalid status. Allowed: ${VALID_STATUSES.join(", ")}` });
+    return res
+      .status(400)
+      .json({
+        message: `Invalid status. Allowed: ${VALID_STATUSES.join(", ")}`,
+      });
   }
 
   try {
@@ -107,24 +123,66 @@ async function updateOrderStatus(req, res) {
       return res.status(200).json({ message: "Status unchanged", order });
     }
 
-    // handle transitions: if cancelling here, restock items
-    if (status === "CANCELLED" && !["CANCELLED"].includes(order.status)) {
+    const prevStatus = order.status;
+    const willBeDelivered = status === "DELIVERED";
+    const wasDelivered = prevStatus === "DELIVERED";
+
+    // handle cancellation: restock items (best-effort)
+    if (status === "CANCELLED" && prevStatus !== "CANCELLED") {
       order.status = "CANCELLED";
       await order.save();
 
-      // restock items (best-effort)
-      for (const it of order.items) {
+      for (const it of order.items || []) {
         try {
-          await Product.findByIdAndUpdate(it.productId, { $inc: { stock: it.quantity } });
+          await Product.findByIdAndUpdate(it.productId, {
+            $inc: { stock: it.quantity },
+          });
         } catch (err) {
-          console.warn(`Failed to restock product ${it.productId}:`, err?.message || err);
+          console.warn(
+            `Failed to restock product ${it.productId}:`,
+            err?.message || err
+          );
         }
       }
 
-      return res.status(200).json({ message: "Order cancelled by admin", order });
+      return res
+        .status(200)
+        .json({ message: "Order cancelled by admin", order });
     }
 
-    // for other statuses just update
+    // If transitioning into DELIVERED (and wasn't delivered before) -> increment sold
+    if (!wasDelivered && willBeDelivered) {
+      for (const it of order.items || []) {
+        try {
+          await Product.findByIdAndUpdate(it.productId, {
+            $inc: { sold: it.quantity },
+          });
+        } catch (err) {
+          console.warn(
+            `Failed to increment sold for product ${it.productId}:`,
+            err?.message || err
+          );
+        }
+      }
+    }
+
+    // If transitioning out of DELIVERED -> decrement sold (undo)
+    if (wasDelivered && !willBeDelivered) {
+      for (const it of order.items || []) {
+        try {
+          await Product.findByIdAndUpdate(it.productId, {
+            $inc: { sold: -it.quantity },
+          });
+        } catch (err) {
+          console.warn(
+            `Failed to decrement sold for product ${it.productId}:`,
+            err?.message || err
+          );
+        }
+      }
+    }
+
+    // For other statuses we just update
     order.status = status;
     await order.save();
 
@@ -182,7 +240,8 @@ async function updateOrderAddressAdmin(req, res) {
       district: newAddr?.district || order.shippingAddress?.district,
       thana: newAddr?.thana || order.shippingAddress?.thana,
       postalCode: newAddr?.postalCode || order.shippingAddress?.postalCode,
-      streetAddress: newAddr?.streetAddress || order.shippingAddress?.streetAddress,
+      streetAddress:
+        newAddr?.streetAddress || order.shippingAddress?.streetAddress,
     };
 
     await order.save();
@@ -215,9 +274,14 @@ async function cancelOrderByAdmin(req, res) {
     // restock items (best-effort)
     for (const it of order.items) {
       try {
-        await Product.findByIdAndUpdate(it.productId, { $inc: { stock: it.quantity } });
+        await Product.findByIdAndUpdate(it.productId, {
+          $inc: { stock: it.quantity },
+        });
       } catch (err) {
-        console.warn(`Failed to restock product ${it.productId}:`, err?.message || err);
+        console.warn(
+          `Failed to restock product ${it.productId}:`,
+          err?.message || err
+        );
       }
     }
 
@@ -253,7 +317,10 @@ async function deleteOrderByAdmin(req, res) {
 async function exportOrders(req, res) {
   try {
     const filters = buildFiltersFromQuery(req.query);
-    const orders = await Order.find(filters).sort({ createdAt: -1 }).populate("user", "fullName email").lean();
+    const orders = await Order.find(filters)
+      .sort({ createdAt: -1 })
+      .populate("user", "fullName email")
+      .lean();
 
     // CSV header
     const header = [
