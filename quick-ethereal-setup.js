@@ -34,4 +34,4 @@ async function sendOtpEmail(to, otp) {
   }
 }
 
-module.exports = { sendOtpEmail };
+module.exports = { sendOtpEmail }; 

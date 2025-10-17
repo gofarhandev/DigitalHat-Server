@@ -4,7 +4,7 @@ const authCtrl = require("../controllers/auth.controller");
 const { verifyToken, isAdmin } = require("../middlewares/auth.middleware");
 
 router.post("/register", authCtrl.register); // OTP send only
-router.post("/verify-otp", authCtrl.verifyOtpHandler); // OTP verify & DB save
+// router.post("/verify-otp", authCtrl.verifyOtpHandler); // OTP verify & DB save
 router.post("/login", authCtrl.login); // Login
 router.post("/logout", authCtrl.logout);
 

@@ -10,83 +10,48 @@ const thirtyDaysInMs = 30 * 24 * 60 * 60 * 1000;
 // 1️⃣ Register (save to pending, send OTP)
 async function register(req, res) {
   try {
-    // Only email is used for authentication flow now
     const { fullName, email, password } = req.body;
 
-    if (!fullName || !password || !email)
+    if (!fullName || !password || !email) {
       return res
         .status(400)
         .json({ message: "fullName, email, and password are required" });
+    }
 
-    // Duplicate check (only for email)
-    if (await User.findOne({ email }))
-      return res.status(409).json({ message: "Email exists" });
+    // Duplicate check
+    const existing = await User.findOne({ email });
+    if (existing) {
+      return res.status(409).json({ message: "Email already exists" });
+    }
 
     // Hash password
     const hashed = await bcrypt.hash(password, 10);
 
-    const identifier = email; // Email is the primary verification identifier
-
-    // Storing data without the top-level phone field
-    pendingUsers.set(identifier, { fullName, email, password: hashed });
-
-    // Send OTP (assumes sendOtp can handle email format)
-    sendOtp(identifier, "verify");
-
-    return res.json({
-      message: "OTP sent to email, complete verification to register",
-    });
-  } catch (err) {
-    console.error(err);
-    return res
-      .status(500)
-      .json({ message: "Server error", error: err.message });
-  }
-}
-
-// 2️⃣ Verify OTP & complete registration
-async function verifyOtpHandler(req, res) {
-  try {
-    const { identifier, otp } = req.body;
-    if (!identifier || !otp)
-      return res
-        .status(400)
-        .json({ message: "identifier (email) and otp required" });
-
-    const result = verifyOtp(identifier, otp);
-    if (!result.ok)
-      return res
-        .status(400)
-        .json({ message: "OTP failed", reason: result.reason });
-
-    const pending = pendingUsers.get(identifier);
-    if (!pending)
-      return res
-        .status(400)
-        .json({ message: "No pending registration found for this identifier" });
-
-    // User creation: isEmailVerified is true as verification just completed
+    // Create user immediately and mark email verified (since no OTP step)
     const user = await User.create({
-      ...pending,
+      fullName,
+      email,
+      password: hashed,
       isEmailVerified: true,
-      isPhoneVerified: false, // Since top-level phone is gone, this is set to false by default
+      isPhoneVerified: false,
+      // add other default fields if needed
     });
-    pendingUsers.delete(identifier);
 
-    // 🔐 Generate JWT token (30 days)
+    // JWT token (30 days)
     const payload = { id: user._id, role: user.role };
     const token = jwt.sign(payload, process.env.JWT_SECRET_KEY, {
       expiresIn: "30d",
     });
 
-    // Set token in HTTP-only cookie for secure, persistent session (30 days)
+    // Set HTTP-only cookie
     res.cookie("token", token, {
       httpOnly: true,
       maxAge: thirtyDaysInMs,
       sameSite: "lax",
+      // secure: true // enable in prod with HTTPS
     });
 
-    return res.json({
+    return res.status(201).json({
       message: "Registration complete",
       token,
       user: {
@@ -98,12 +63,73 @@ async function verifyOtpHandler(req, res) {
       },
     });
   } catch (err) {
-    console.error(err);
+    console.error("register error:", err);
     return res
       .status(500)
       .json({ message: "Server error", error: err.message });
   }
 }
+
+// 2️⃣ Verify OTP & complete registration
+// async function verifyOtpHandler(req, res) {
+//   try {
+//     const { identifier, otp } = req.body;
+//     if (!identifier || !otp)
+//       return res
+//         .status(400)
+//         .json({ message: "identifier (email) and otp required" });
+
+//     const result = verifyOtp(identifier, otp);
+//     if (!result.ok)
+//       return res
+//         .status(400)
+//         .json({ message: "OTP failed", reason: result.reason });
+
+//     const pending = pendingUsers.get(identifier);
+//     if (!pending)
+//       return res
+//         .status(400)
+//         .json({ message: "No pending registration found for this identifier" });
+
+//     // User creation: isEmailVerified is true as verification just completed
+//     const user = await User.create({
+//       ...pending,
+//       isEmailVerified: true,
+//       isPhoneVerified: false, // Since top-level phone is gone, this is set to false by default
+//     });
+//     pendingUsers.delete(identifier);
+
+//     // 🔐 Generate JWT token (30 days)
+//     const payload = { id: user._id, role: user.role };
+//     const token = jwt.sign(payload, process.env.JWT_SECRET_KEY, {
+//       expiresIn: "30d",
+//     });
+
+//     // Set token in HTTP-only cookie for secure, persistent session (30 days)
+//     res.cookie("token", token, {
+//       httpOnly: true,
+//       maxAge: thirtyDaysInMs,
+//       sameSite: "lax",
+//     });
+
+//     return res.json({
+//       message: "Registration complete",
+//       token,
+//       user: {
+//         id: user._id,
+//         fullName: user.fullName,
+//         email: user.email,
+//         role: user.role,
+//         shippingAddress: user.shippingAddress,
+//       },
+//     });
+//   } catch (err) {
+//     console.error(err);
+//     return res
+//       .status(500)
+//       .json({ message: "Server error", error: err.message });
+//   }
+// }
 
 // 3️⃣ Login
 async function login(req, res) {
@@ -254,7 +280,7 @@ const updateUser = async (req, res) => {
 
 module.exports = {
   register,
-  verifyOtpHandler,
+  // verifyOtpHandler,
   login,
   logout,
   getMe,
