@@ -1,24 +1,37 @@
-// quick-ethereal-setup.js (one-time dev test)
+// mailer.js
 const nodemailer = require("nodemailer");
 
-(async () => {
-  const testAccount = await nodemailer.createTestAccount();
-  const transporter = nodemailer.createTransport({
-    host: testAccount.smtp.host,
-    port: testAccount.smtp.port,
-    secure: testAccount.smtp.secure,
-    auth: {
-      user: testAccount.user,
-      pass: testAccount.pass,
-    },
-  });
+const transporter = nodemailer.createTransport({
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false, // TLS will be used with STARTTLS
+  auth: {
+    user: process.env.SMTP_USER, // your full gmail address
+    pass: process.env.SMTP_PASS, // Gmail App Password (16 chars)
+  },
+});
 
-  const info = await transporter.sendMail({
-    from: '"Ethereal Test" <test@example.com>',
-    to: "recipient@example.com",
-    subject: "Ethereal OTP test",
-    html: "<b>Your OTP is 123456</b>",
-  });
+// verify connection (good for startup logs)
+transporter
+  .verify()
+  .then(() => console.log("SMTP verified ✅"))
+  .catch((err) => console.error("SMTP verify failed ❌", err));
 
-  console.log("Preview URL:", nodemailer.getTestMessageUrl(info));
-})();
+async function sendOtpEmail(to, otp) {
+  try {
+    const info = await transporter.sendMail({
+      from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+      to,
+      subject: "Your OTP code",
+      text: `Your OTP: ${otp}`,
+      html: `<p>Your OTP: <b>${otp}</b></p>`,
+    });
+    console.log("OTP Email sent, messageId:", info.messageId);
+    return { ok: true, info };
+  } catch (err) {
+    console.error("sendEmail error:", err);
+    return { ok: false, error: err };
+  }
+}
+
+module.exports = { sendOtpEmail };
